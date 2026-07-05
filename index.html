@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tic-Tac-Toe — You vs AI</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --cell: #334155;
+    --cell-hover: #475569;
+    --x: #38bdf8;
+    --o: #fb7185;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --win: #22c55e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; letter-spacing: 0.5px; }
+  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
+  .scoreboard {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .score {
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 10px 18px;
+    text-align: center;
+    min-width: 84px;
+  }
+  .score .label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .score .value { font-size: 1.5rem; font-weight: 700; margin-top: 2px; }
+  .score.you .value { color: var(--x); }
+  .score.ai .value { color: var(--o); }
+  .status {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+    min-height: 1.4em;
+    text-align: center;
+  }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(3, 96px);
+    grid-template-rows: repeat(3, 96px);
+    gap: 10px;
+  }
+  .cell {
+    background: var(--cell);
+    border-radius: 14px;
+    font-size: 3rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.05s;
+    line-height: 1;
+  }
+  .cell:not(.filled):hover { background: var(--cell-hover); }
+  .cell:active:not(.filled) { transform: scale(0.96); }
+  .cell.x { color: var(--x); }
+  .cell.o { color: var(--o); }
+  .cell.filled { cursor: default; }
+  .cell.win { background: var(--win); color: #0f172a; }
+  .board.locked .cell:not(.filled) { cursor: default; }
+  button {
+    margin-top: 22px;
+    background: var(--x);
+    color: #0f172a;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 28px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.88; }
+  .footer { color: var(--muted); font-size: 0.78rem; margin-top: 18px; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>Tic-Tac-Toe</h1>
+  <div class="subtitle">You (X) vs Unbeatable AI (O)</div>
+
+  <div class="scoreboard">
+    <div class="score you"><div class="label">You</div><div class="value" id="scoreYou">0</div></div>
+    <div class="score"><div class="label">Draws</div><div class="value" id="scoreDraw">0</div></div>
+    <div class="score ai"><div class="label">AI</div><div class="value" id="scoreAI">0</div></div>
+  </div>
+
+  <div class="status" id="status">Your move — you're X.</div>
+
+  <div class="board" id="board" aria-label="Tic Tac Toe board" role="grid"></div>
+
+  <button id="reset">New Round</button>
+
+  <div class="footer">The AI plays a perfect game. The best you can do is force a draw.</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var HUMAN = "X";
+  var AI = "O";
+
+  // Winning line index triplets.
+  var LINES = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
+    [0, 3, 6], [1, 4, 7], [2, 5, 8], // cols
+    [0, 4, 8], [2, 4, 6]             // diagonals
+  ];
+
+  var board = ["", "", "", "", "", "", "", "", ""];
+  var gameOver = false;
+  var locked = false; // true while it is the AI's turn (blocks input)
+  var scores = { you: 0, ai: 0, draw: 0 };
+
+  var boardEl = document.getElementById("board");
+  var statusEl = document.getElementById("status");
+  var resetBtn = document.getElementById("reset");
+  var cells = [];
+
+  // Build the 9 cells once.
+  for (var i = 0; i < 9; i++) {
+    var cell = document.createElement("div");
+    cell.className = "cell";
+    cell.setAttribute("role", "gridcell");
+    cell.dataset.index = String(i);
+    boardEl.appendChild(cell);
+    cells.push(cell);
+  }
+
+  boardEl.addEventListener("click", onBoardClick);
+  resetBtn.addEventListener("click", newRound);
+
+  function onBoardClick(e) {
+    var target = e.target.closest(".cell");
+    if (!target) return;
+    var idx = Number(target.dataset.index);
+    handleHumanMove(idx);
+  }
+
+  function handleHumanMove(idx) {
+    // Guard against every illegal move: game finished, AI thinking,
+    // out-of-range, or an already-filled square.
+    if (gameOver || locked) return;
+    if (idx < 0 || idx > 8) return;
+    if (board[idx] !== "") return;
+
+    place(idx, HUMAN);
+
+    if (checkEnd()) return;
+
+    // Hand the turn to the AI and lock the board so the human cannot
+    // sneak a second move in while the AI "thinks".
+    locked = true;
+    setStatus("AI is thinking…");
+    // Small delay purely for feel; logic does not depend on it.
+    window.setTimeout(aiMove, 220);
+  }
+
+  function aiMove() {
+    // Defensive: never act on a finished board.
+    if (gameOver) { locked = false; return; }
+
+    var idx = bestMove(board);
+    if (idx !== -1) {
+      place(idx, AI);
+    }
+
+    locked = false;
+    if (!checkEnd()) {
+      setStatus("Your move — you're X.");
+    }
+  }
+
+  function place(idx, player) {
+    board[idx] = player;
+    var cell = cells[idx];
+    cell.textContent = player;
+    cell.classList.add("filled");
+    cell.classList.add(player === HUMAN ? "x" : "o");
+  }
+
+  // Evaluates the current board. If the game ended, updates the UI/score
+  // and returns true. Otherwise returns false.
+  function checkEnd() {
+    var win = getWinner(board);
+    if (win) {
+      gameOver = true;
+      locked = false;
+      highlight(win.line);
+      if (win.player === HUMAN) {
+        scores.you++;
+        setStatus("You win! 🎉");
+      } else {
+        scores.ai++;
+        setStatus("AI wins.");
+      }
+      updateScores();
+      return true;
+    }
+    if (isFull(board)) {
+      gameOver = true;
+      locked = false;
+      scores.draw++;
+      setStatus("It's a draw.");
+      updateScores();
+      return true;
+    }
+    return false;
+  }
+
+  // Returns { player, line } if there is a winner, otherwise null.
+  function getWinner(b) {
+    for (var i = 0; i < LINES.length; i++) {
+      var a = LINES[i][0], c = LINES[i][1], d = LINES[i][2];
+      if (b[a] !== "" && b[a] === b[c] && b[a] === b[d]) {
+        return { player: b[a], line: LINES[i] };
+      }
+    }
+    return null;
+  }
+
+  function isFull(b) {
+    for (var i = 0; i < 9; i++) {
+      if (b[i] === "") return false;
+    }
+    return true;
+  }
+
+  function highlight(line) {
+    for (var i = 0; i < line.length; i++) {
+      cells[line[i]].classList.add("win");
+    }
+  }
+
+  // ---- Perfect-play AI (minimax) ----
+  // Returns the index of an optimal move for the AI on board b.
+  function bestMove(b) {
+    var bestScore = -Infinity;
+    var move = -1;
+    for (var i = 0; i < 9; i++) {
+      if (b[i] === "") {
+        b[i] = AI;
+        var score = minimax(b, 0, false);
+        b[i] = "";
+        if (score > bestScore) {
+          bestScore = score;
+          move = i;
+        }
+      }
+    }
+    return move;
+  }
+
+  // depth is used so the AI prefers faster wins and slower losses,
+  // which also makes it take the quickest kill and drag out any
+  // (impossible-with-perfect-play) loss.
+  function minimax(b, depth, isMaximizing) {
+    var winner = getWinner(b);
+    if (winner) {
+      return winner.player === AI ? 10 - depth : depth - 10;
+    }
+    if (isFull(b)) return 0;
+
+    var i, score;
+    if (isMaximizing) {
+      var best = -Infinity;
+      for (i = 0; i < 9; i++) {
+        if (b[i] === "") {
+          b[i] = AI;
+          score = minimax(b, depth + 1, false);
+          b[i] = "";
+          if (score > best) best = score;
+        }
+      }
+      return best;
+    } else {
+      var worst = Infinity;
+      for (i = 0; i < 9; i++) {
+        if (b[i] === "") {
+          b[i] = HUMAN;
+          score = minimax(b, depth + 1, true);
+          b[i] = "";
+          if (score < worst) worst = score;
+        }
+      }
+      return worst;
+    }
+  }
+
+  // ---- Round / UI management ----
+  function newRound() {
+    board = ["", "", "", "", "", "", "", "", ""];
+    gameOver = false;
+    locked = false;
+    for (var i = 0; i < 9; i++) {
+      var cell = cells[i];
+      cell.textContent = "";
+      cell.className = "cell";
+      cell.setAttribute("role", "gridcell");
+      cell.dataset.index = String(i);
+    }
+    setStatus("Your move — you're X.");
+  }
+
+  function setStatus(msg) {
+    statusEl.textContent = msg;
+    boardEl.classList.toggle("locked", locked);
+  }
+
+  function updateScores() {
+    document.getElementById("scoreYou").textContent = String(scores.you);
+    document.getElementById("scoreAI").textContent = String(scores.ai);
+    document.getElementById("scoreDraw").textContent = String(scores.draw);
+  }
+})();
+</script>
+</body>
+</html>
